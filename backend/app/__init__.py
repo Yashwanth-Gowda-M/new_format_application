@@ -20,7 +20,8 @@ def create_app(config_name=None) -> Flask:
     if not config_name:
         config_name = os.getenv("FLASK_ENV", "development").lower()
 
-    app = Flask(__name__)
+#    app = Flask(__name__,template_folder="../../frontend/templates",static_folder="../../frontend/static")
+    app = Flask(__name__,template_folder="/frontend/templates",static_folder="/frontend/static")
     config_class = config_by_name.get(config_name, config_by_name["default"])
     app.config.from_object(config_class)
 
