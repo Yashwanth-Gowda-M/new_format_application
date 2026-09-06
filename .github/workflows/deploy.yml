@@ -5,19 +5,19 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-
 env:
-  DOCKER_USER_NAME: ${{ secrets.DOCKER_USER_NAME }}
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USER_NAME }}
   DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
   IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
   IMAGE_TAG: ${{ secrets.IMAGE_TAG }}
+
   TARGET_HOST: ${{ secrets.TARGET_HOST }}
   TARGET_USER: ${{ secrets.TARGET_USER }}
 
 jobs:
   deploy:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -25,47 +25,43 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      #########################################################
-      # DockerHub Login
-      #########################################################
-
       - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USER_NAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_PASSWORD }}
 
-      #########################################################
-      # Build Images
-      #########################################################
+      #######################################################
+      # Build Backend
+      #######################################################
 
       - name: Build Backend Image
         run: |
           docker build \
-            -f backend/Dockerfile \
-            -t ${DOCKER_USER_NAME}/${IMAGE_NAME}-backend:${IMAGE_TAG} .
+            -t ${DOCKER_USERNAME}/${IMAGE_NAME}-backend:${IMAGE_TAG} \
+            backend
+
+      - name: Push Backend Image
+        run: |
+          docker push ${DOCKER_USERNAME}/${IMAGE_NAME}-backend:${IMAGE_TAG}
+
+      #######################################################
+      # Build Frontend
+      #######################################################
 
       - name: Build Frontend Image
         run: |
           docker build \
-            -f frontend/Dockerfile \
-            -t ${DOCKER_USER_NAME}/${IMAGE_NAME}-frontend:${IMAGE_TAG} .
+            -t ${DOCKER_USERNAME}/${IMAGE_NAME}-frontend:${IMAGE_TAG} \
+            frontend
 
-      #########################################################
-      # Push Images
-      #########################################################
-
-      - name: Push Backend
+      - name: Push Frontend Image
         run: |
-          docker push ${DOCKER_USER_NAME}/${IMAGE_NAME}-backend:${IMAGE_TAG}
+          docker push ${DOCKER_USERNAME}/${IMAGE_NAME}-frontend:${IMAGE_TAG}
 
-      - name: Push Frontend
-        run: |
-          docker push ${DOCKER_USER_NAME}/${IMAGE_NAME}-frontend:${IMAGE_TAG}
-
-      #########################################################
-      # SSH Configuration
-      #########################################################
+      #######################################################
+      # SSH
+      #######################################################
 
       - name: Configure SSH
         run: |
@@ -75,61 +71,67 @@ jobs:
 
           chmod 600 ~/.ssh/id_rsa
 
-          ssh-keyscan -H $TARGET_HOST >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${TARGET_HOST} >> ~/.ssh/known_hosts
 
-      #########################################################
+      #######################################################
       # Create .env
-      #########################################################
+      #######################################################
 
       - name: Create Environment File
         run: |
-          printf "%s" "${{ secrets.ENV_FILE }}" > .env
+          cat > .env <<EOF
+          ${{ secrets.ENV_FILE }}
+          EOF
 
-      #########################################################
+      #######################################################
+      # Copy .env
+      #######################################################
+
+      - name: Copy .env to Server
+        run: |
+          scp .env ${TARGET_USER}@${TARGET_HOST}:~/.env
+
+      #######################################################
       # Deploy
-      #########################################################
+      #######################################################
 
       - name: Deploy Application
         run: |
-
-          APP_DIR="assignment"
-
-          ssh ${TARGET_USER}@${TARGET_HOST} "
-
-          if [ ! -d \$HOME/${APP_DIR} ]; then
-              git clone https://github.com/${{ github.repository }} \$HOME/${APP_DIR}
-          else
-              cd \$HOME/${APP_DIR}
-              git pull origin main
-          fi
-          "
-
-          scp .env ${TARGET_USER}@${TARGET_HOST}:~/assignment/.env
-
-          ssh ${TARGET_USER}@${TARGET_HOST} "
+          ssh ${TARGET_USER}@${TARGET_HOST} <<'EOF'
 
           set -e
 
-          cd ~/assignment
+          APP_DIR="$HOME/assignment"
+
+          if [ ! -d "$APP_DIR" ]; then
+              git clone https://github.com/${{ github.repository }} "$APP_DIR"
+          else
+              cd "$APP_DIR"
+              git pull origin main
+          fi
+
+          cd "$APP_DIR"
+
+          cp ~/.env .env
 
           chmod +x deployment/scripts/docker-install.sh
 
           ./deployment/scripts/docker-install.sh
 
-          docker login \
-            -u '${DOCKER_USER_NAME}' \
-            -p '${DOCKER_PASSWORD}'
+          echo "${DOCKER_PASSWORD}" | docker login \
+              -u "${DOCKER_USERNAME}" \
+              --password-stdin
 
           docker compose \
-            -f deployment/docker/docker-compose.yml \
-            pull
+              -f deployment/docker/docker-compose.yml \
+              pull
 
           docker compose \
-            -f deployment/docker/docker-compose.yml \
-            up -d
+              -f deployment/docker/docker-compose.yml \
+              up -d --remove-orphans
 
           docker image prune -af
 
           docker ps
 
-          "
+          EOF
