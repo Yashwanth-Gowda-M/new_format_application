@@ -39,7 +39,8 @@ jobs:
         run: |
           docker build \
             -t ${DOCKER_USERNAME}/${IMAGE_NAME}-backend:${IMAGE_TAG} \
-            backend
+            -f backend/Dockerfile \
+            .
 
       - name: Push Backend Image
         run: |
