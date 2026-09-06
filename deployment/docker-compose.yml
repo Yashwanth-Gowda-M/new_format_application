@@ -1,0 +1,77 @@
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: assignment-redis
+
+    restart: unless-stopped
+
+    command: redis-server --appendonly yes
+
+    networks:
+      - assignment-network
+
+    volumes:
+      - redis_data:/data
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: ${DOCKER_USER_NAME}/${IMAGE_NAME}-backend:${IMAGE_TAG}
+    container_name: assignment-backend
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    ports:
+      - "5000:5000"
+
+    networks:
+      - assignment-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://localhost:5000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    image: ${DOCKER_USER_NAME}/${IMAGE_NAME}-frontend:${IMAGE_TAG}
+    container_name: assignment-frontend
+
+    restart: unless-stopped
+
+    depends_on:
+      backend:
+        condition: service_started
+
+    ports:
+      - "80:80"
+
+    networks:
+      - assignment-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://localhost || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+networks:
+  assignment-network:
+    driver: bridge
+
+volumes:
+  redis_data:

@@ -1,0 +1,136 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_USER_NAME: ${{ secrets.DOCKER_USER_NAME }}
+  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+  IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
+  IMAGE_TAG: ${{ secrets.IMAGE_TAG }}
+
+  TARGET_HOST: ${{ secrets.TARGET_HOST }}
+  TARGET_USER: ${{ secrets.TARGET_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      ###########################################################
+      # DockerHub Login
+      ###########################################################
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USER_NAME }}
+          password: ${{ env.DOCKER_PASSWORD }}
+
+      ###########################################################
+      # Backend Image
+      ###########################################################
+
+      - name: Build Backend Image
+        run: |
+          docker build \
+            -t ${DOCKER_USER_NAME}/${IMAGE_NAME}-backend:${IMAGE_TAG} \
+            -f backend/Dockerfile .
+
+      - name: Push Backend Image
+        run: |
+          docker push ${DOCKER_USER_NAME}/${IMAGE_NAME}-backend:${IMAGE_TAG}
+
+      ###########################################################
+      # Frontend Image
+      ###########################################################
+
+      - name: Build Frontend Image
+        run: |
+          docker build \
+            -t ${DOCKER_USER_NAME}/${IMAGE_NAME}-frontend:${IMAGE_TAG} \
+            -f frontend/Dockerfile .
+
+      - name: Push Frontend Image
+        run: |
+          docker push ${DOCKER_USER_NAME}/${IMAGE_NAME}-frontend:${IMAGE_TAG}
+
+      ###########################################################
+      # Configure SSH
+      ###########################################################
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+
+          echo "${SSH_PRIVATE_KEY}" > ~/.ssh/id_rsa
+
+          chmod 600 ~/.ssh/id_rsa
+
+          ssh-keyscan -H ${TARGET_HOST} >> ~/.ssh/known_hosts
+
+      ###########################################################
+      # Deploy
+      ###########################################################
+
+      - name: Deploy to VM
+        run: |
+
+          ssh ${TARGET_USER}@${TARGET_HOST} << 'EOF'
+
+          set -e
+
+          APP_DIR="$HOME/assignment"
+
+          if [ ! -d "$APP_DIR" ]; then
+
+            git clone https://github.com/${{ github.repository }} "$APP_DIR"
+
+          else
+
+            cd "$APP_DIR"
+
+            git pull origin main
+
+          fi
+
+          cd "$APP_DIR"
+
+          chmod +x deployment/scripts/docker-install.sh
+
+          ./deployment/scripts/docker-install.sh
+
+          cat > .env << ENVEOF
+${{ secrets.ENV_FILE }}
+ENVEOF
+
+          docker login \
+            -u "${DOCKER_USER_NAME}" \
+            -p "${DOCKER_PASSWORD}"
+
+          docker compose \
+            -f deployment/docker/docker-compose.yml \
+            pull
+
+          docker compose \
+            -f deployment/docker/docker-compose.yml \
+            up -d
+
+          docker image prune -af
+
+          docker ps
+
+          EOF
