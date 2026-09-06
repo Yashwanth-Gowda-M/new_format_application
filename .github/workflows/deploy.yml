@@ -8,50 +8,40 @@ on:
 env:
   DOCKER_USERNAME: ${{ secrets.DOCKER_USER_NAME }}
   DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
   IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
   IMAGE_TAG: ${{ secrets.IMAGE_TAG }}
-
   TARGET_HOST: ${{ secrets.TARGET_HOST }}
   TARGET_USER: ${{ secrets.TARGET_USER }}
 
 jobs:
   deploy:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Login to DockerHub
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKER_USERNAME }}
           password: ${{ env.DOCKER_PASSWORD }}
 
-      #######################################################
-      # Build Backend
-      #######################################################
-
       - name: Build Backend Image
         run: |
           docker build \
+            -f backend/Dockerfile \
             -t ${DOCKER_USERNAME}/${IMAGE_NAME}-backend:${IMAGE_TAG} \
-            backend
+            .
 
       - name: Push Backend Image
         run: |
           docker push ${DOCKER_USERNAME}/${IMAGE_NAME}-backend:${IMAGE_TAG}
 
-      #######################################################
-      # Build Frontend
-      #######################################################
-
       - name: Build Frontend Image
         run: |
           docker build \
+            -f frontend/Dockerfile \
             -t ${DOCKER_USERNAME}/${IMAGE_NAME}-frontend:${IMAGE_TAG} \
             frontend
 
@@ -59,79 +49,46 @@ jobs:
         run: |
           docker push ${DOCKER_USERNAME}/${IMAGE_NAME}-frontend:${IMAGE_TAG}
 
-      #######################################################
-      # SSH
-      #######################################################
-
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
-
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-
           chmod 600 ~/.ssh/id_rsa
-
-          ssh-keyscan -H ${TARGET_HOST} >> ~/.ssh/known_hosts
-
-      #######################################################
-      # Create .env
-      #######################################################
+          ssh-keyscan -H "${TARGET_HOST}" >> ~/.ssh/known_hosts
 
       - name: Create Environment File
         run: |
-          cat > .env <<EOF
-          ${{ secrets.ENV_FILE }}
-          EOF
+          printf "%s" "${{ secrets.ENV_FILE }}" > .env
 
-      #######################################################
-      # Copy .env
-      #######################################################
-
-      - name: Copy .env to Server
+      - name: Copy Environment File
         run: |
-          scp .env ${TARGET_USER}@${TARGET_HOST}:~/.env
+          scp -i ~/.ssh/id_rsa .env ${TARGET_USER}@${TARGET_HOST}:~/assignment/.env
 
-      #######################################################
-      # Deploy
-      #######################################################
-
-      - name: Deploy Application
+      - name: Deploy
         run: |
-          ssh ${TARGET_USER}@${TARGET_HOST} <<'EOF'
-
+          ssh -i ~/.ssh/id_rsa ${TARGET_USER}@${TARGET_HOST} <<'EOF'
           set -e
 
           APP_DIR="$HOME/assignment"
 
-          if [ ! -d "$APP_DIR" ]; then
-              git clone https://github.com/${{ github.repository }} "$APP_DIR"
+          if [ ! -d "$APP_DIR/.git" ]; then
+            git clone https://github.com/${{ github.repository }} "$APP_DIR"
           else
-              cd "$APP_DIR"
-              git pull origin main
+            cd "$APP_DIR"
+            git pull origin main
           fi
 
           cd "$APP_DIR"
 
-          cp ~/.env .env
-
           chmod +x deployment/scripts/docker-install.sh
-
           ./deployment/scripts/docker-install.sh
 
           echo "${DOCKER_PASSWORD}" | docker login \
-              -u "${DOCKER_USERNAME}" \
-              --password-stdin
+            -u "${DOCKER_USERNAME}" \
+            --password-stdin
 
-          docker compose \
-              -f deployment/docker/docker-compose.yml \
-              pull
-
-          docker compose \
-              -f deployment/docker/docker-compose.yml \
-              up -d --remove-orphans
+          docker compose -f deployment/docker/docker-compose.yml pull
+          docker compose -f deployment/docker/docker-compose.yml up -d --remove-orphans
 
           docker image prune -af
-
-          docker ps
-
           EOF
