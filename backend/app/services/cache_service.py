@@ -1,7 +1,7 @@
 import json
 import logging
 from datetime import datetime, date
-from app.extensions import redis_client
+import app.extensions as extensions
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +27,9 @@ class CacheService:
     def get(cls, key: str):
         """Fetches and deserializes cached JSON object."""
         try:
-            if not redis_client:
+            if not extensions.redis_client:
                 return None
-            val = redis_client.get(cls._key(key))
+            val = extensions.redis_client.get(cls._key(key))
             if val:
                 return json.loads(val)
         except Exception as exc:
@@ -40,11 +40,12 @@ class CacheService:
     def set(cls, key: str, value, ttl: int = None) -> bool:
         """Serializes and saves object to Redis cache."""
         try:
-            if not redis_client:
+            logger.info(f"Redis client: {extensions.redis_client}")
+            if not extensions.redis_client:
                 return False
             ttl = ttl or cls.DEFAULT_TTL
             serialized = json.dumps(value, cls=CustomJSONEncoder)
-            return bool(redis_client.setex(cls._key(key), ttl, serialized))
+            return bool(extensions.redis_client.setex(cls._key(key), ttl, serialized))
         except Exception as exc:
             logger.warning(f"Cache SET error for key '{key}': {exc}")
             return False
@@ -53,9 +54,9 @@ class CacheService:
     def delete(cls, key: str) -> bool:
         """Deletes a single cache key."""
         try:
-            if not redis_client:
+            if not extensions.redis_client:
                 return False
-            return bool(redis_client.delete(cls._key(key)))
+            return bool(extensions.redis_client.delete(cls._key(key)))
         except Exception as exc:
             logger.warning(f"Cache DELETE error for key '{key}': {exc}")
             return False
@@ -64,12 +65,12 @@ class CacheService:
     def delete_pattern(cls, pattern: str) -> int:
         """Deletes all keys matching a pattern."""
         try:
-            if not redis_client:
+            if not extensions.redis_client:
                 return 0
             search = f"{cls.PREFIX}{pattern}"
-            keys = redis_client.keys(search)
+            keys = extensions.redis_client.keys(search)
             if keys:
-                return redis_client.delete(*keys)
+                return extensions.redis_client.delete(*keys)
         except Exception as exc:
             logger.warning(f"Cache pattern invalidation error for '{pattern}': {exc}")
         return 0

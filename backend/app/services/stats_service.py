@@ -1,3 +1,4 @@
+import logging
 from sqlalchemy import func
 from app.extensions import db
 from app.models.assignment import Assignment
@@ -5,13 +6,14 @@ from app.models.group import Group, GroupMember
 from app.models.submission import Submission
 from app.models.user import User
 from app.services.cache_service import CacheService
-
+logger = logging.getLogger(__name__)
 
 class StatsService:
     """Computes portal metrics and KPIs with automated Redis caching."""
 
     @classmethod
     def get_admin_dashboard_metrics(cls) -> dict:
+        logger.info("Inside get_admin_dashboard_metrics()")
         cached = CacheService.get_dashboard_stats("admin")
         if cached:
             return cached
